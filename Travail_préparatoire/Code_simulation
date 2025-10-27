@@ -1,1 +1,100 @@
+% Ça part!!!!!
 
+% Étape 1 - Simuler le mouvement / position d'une particule (une position
+% par time frame, puis nouvelle simulation de la position pour un nouveau time frame)
+% Ici le mouvement brownien dépend de D théorique (qu'on fixe)
+% Pourrait direct retourner un vecteur avec les N positions xy de
+% l'expérience (par ex N = 100, on a les 100 positions)
+
+% Étape 2 - Simuler une photo réaliste à partir de cette position
+% (connaissant cette position) --> PSF  et Poisson. 
+
+% Étape 3 - Fit gaussien pour trouver la position expérimentale de la
+% particule, pour chaque photo
+
+% Étape 4 - Avec toutes les positions sur toutes les photos, calculer le
+% MSD
+
+% Étape 5 - Avec le MSD, estimer D puis r la taille de la particule
+
+% Étape 6 - Contraste et résolution
+
+% Étape 7 - Paramètres à varier, structure générale qui fait appel à toutes
+% ces fonctions. 
+
+
+% =========================================================================
+
+% Code : 
+
+% Étape 1 : simuler la position d'une particule en mouvement brownien. 
+
+% 1.1 - D théorique : 
+r_true = 1E-6 ; % Vraie taille de la particule! Rayon d'un micron --> trop grand?
+
+k_b = 1.380649E-23 ; % en J/K
+temp = 293 ; % en K, = 20 degrés Celsius, approx.
+eta = 1E-3 ; % viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
+D_theo = (k_b * temp) / (6 * pi * eta * r_true) ; 
+
+delta_t = 0.1 ; % 1 ms entre chaque frame? 
+
+% 1.2 - Mouvement brownien pour chaque frame : 
+
+function [x2, y2] = brownien(x1, y1, D_theo, delta_t)
+
+% Définition de la fonction "brownien" : 
+%   Paramètres sortie : x2 et y2 les coordonnées réelles de la particule.
+%   Paramètres entrée : x1 et y1 les coordonnées initiales de la particule;
+%                       D le coefficient de diffusion théorique;
+%                       delta_t le temps entre chaque frame;
+%                       
+%                       Optionnel : N pour direct retourner un vecteur de N
+%                       positions???
+
+% X = randn returns a random scalar drawn from the standard normal distribution.
+
+
+% Calculer les déplacements aléatoires en fonction du coefficient de diffusion
+sigma = sqrt(2 * D_theo * delta_t); % Écart type du mouvement brownien
+x2 = x1 + sigma * randn; % Nouvelle position x
+y2 = y1 + sigma * randn; % Nouvelle position y
+
+end 
+
+% Si on veut pour N positions : 
+N = 100; % Nombre de positions à simuler
+x_positions = zeros(1, N); % Initialiser le vecteur des positions x
+y_positions = zeros(1, N); % Initialiser le vecteur des positions y
+x_positions(1) = 0; % Position initiale x, mettons 0.
+y_positions(1) = 0; % Position initiale y, mettons 0.
+
+for i = 2:N
+    [x_positions(i), y_positions(i)] = brownien(x_positions(i-1), y_positions(i-1), D_theo, delta_t);
+end
+
+%x_positions
+%y_positions
+
+%plot(x_positions,y_positions,'b-o');
+%legend('mouvement brownien')
+
+
+% -------------------------------------------------------------------------
+
+% Étape 2 - Simuler une photo réaliste à partir de cette position
+% (connaissant cette position) --> PSF  et Poisson.
+
+function psf = psf_theo(x, y, NA, lambda)
+
+    % 2.1 - Créer la grille (pour pixéliser --> dépend taille pixel)
+    
+
+
+    % 2.2 - Générer la PSF discrétisée sur la grille, avec la formule puis
+    % la convolution
+
+    % 2.3 -  Bruit de Poisson
+
+
+end
