@@ -1,305 +1,276 @@
+function simulate_localize_SE()
 % Simulateur + localisation + estimation D -> r (Stokes-Einstein)
 % Unités : micromètres (um), secondes (s)
-% Dépendances : MATLAB base, Optimization Toolbox, Statistics Toolbox, Image Processing Toolbox (optionnel)
+% Placez ce fichier dans simulate_localize_SE.m et lancez simulate_localize_SE
 
-% ---- Constantes physiques ----
-% Define physical constants used in calculations
-kB = 1.380649e-23;   % Boltzmann constant in J/K (Joules per Kelvin)
-% conversion: 1 J = 1 (kg m^2 / s^2). We'll convert lengths to meters when nécessaire.
+%% ---- Constantes physiques ----
+kB = 1.380649e-23; % J/K
 
-% Set RNG for reproducibility
-rng(42, 'twister');
+%% ---- Paramètres par défaut ----
+params.magnification = 60.0;          % x60
+params.pixel_size_sensor = 2.4;       % um
+params.roi_size = 21;                 % pixels (impair)
+params.lambda = 0.520;                % um (wavelength)
+params.NA = 0.8;                      % numerical aperture
+params.photons_per_frame = 800.0;
+params.background = 5.0;              % photons/pixel
+params.read_noise = 1.5;              % e- RMS
+params.gain = 1.0;
+params.rng_seed = 42;
 
-% ---- Fonctions utilitaires ----
+rng(params.rng_seed);
 
-function g = gaussian2d(xy, p)
-    % Modèle 2D gaussian flattené pour lsqcurvefit.
-    % xy: (N, 2) where xy(:,1)=x(:), xy(:,2)=y(:)
-    % p = [A, x0, y0, sigma, offset]
-    x = xy(:,1);
-    y = xy(:,2);
-    A = p(1);
-    x0 = p(2);
-    y0 = p(3);
-    sigma = p(4);
-    offset = p(5);
-    g = A * exp(-((x - x0).^2 + (y - y0).^2) / (2 * sigma^2)) + offset;
+%% ---- Scenario d'exemple ----
+T_frames = 1000;
+dt = 0.05;  % s
+D_true = 0.5; % um^2/s
+
+traj = simulate_trajectory(D_true, T_frames, dt);
+traj = traj - mean(traj,1); % recentrer trajectoire autour de 0
+
+% rendre et localiser
+locs = zeros(T_frames,2);
+images = cell(T_frames,1);
+for i=1:T_frames
+    frame = render_frame(traj(i,:), params);
+    images{i} = frame;
+    [x_abs, y_abs, sigma_r, A, offset, pcov] = localize_gaussian(frame, [], params.roi_size);
+    % conversion pixel -> object plane (um)
+    center_pix = (params.roi_size-1)/2.0;
+    dx_pix = x_abs - center_pix;
+    dy_pix = y_abs - center_pix;
+    dx_um = dx_pix * params.pixel_size_sensor / params.magnification;
+    dy_um = dy_pix * params.pixel_size_sensor / params.magnification;
+    locs(i,:) = [dx_um, dy_um];
 end
 
-function [X, Y] = make_grid(roi_size, pixel_size)
-    % Return meshgrid (in pixel coordinates) for roi_size (odd int).
-    s = roi_size;  % Store the ROI size for clarity
-    coords = ((0:s-1) - (s-1)/2.0) * pixel_size;  % Create 1D coordinates from -(s-1)/2 to (s-1)/2, scaled
-    [X, Y] = meshgrid(coords, coords);  % Create 2D meshgrid for X and Y
+% compute msd
+max_lag = 50;
+[taus, msd] = compute_msd(locs, max_lag);
+
+% fit msd linéaire
+[D_hat, intercept, cov_beta, se_D] = fit_msd_linear(taus, msd, dt, 2);
+
+% Stokes-Einstein conversion D -> r
+D_hat_m2s = D_hat * 1e-12; % um^2/s -> m^2/s
+T_kelvin = 293.15; % 20 °C
+eta = 1.0e-3; % Pa·s
+r_hat_m = kB * T_kelvin / (6 * pi * eta * D_hat_m2s);
+r_hat_um = r_hat_m * 1e6;
+
+sigma_D = se_D;
+sigma_D_m2s = sigma_D * 1e-12;
+if D_hat_m2s > 0
+    sigma_r_m = (kB * T_kelvin / (6 * pi * eta)) * sigma_D_m2s / (D_hat_m2s^2);
+else
+    sigma_r_m = NaN;
+end
+sigma_r_um = sigma_r_m * 1e6;
+
+% Affichage
+fprintf('True D (um^2/s): %.4f\n', D_true);
+fprintf('Estimated D_hat (um^2/s): %.6f +- %.6f\n', D_hat, sigma_D);
+fprintf('Intercept (should reflect 4*sigma_loc^2) : %.6f\n', intercept);
+fprintf('Estimated radius r (um): %.3f +- %.3f\n', r_hat_um, sigma_r_um);
+
+% Plots
+figure; plot(locs(:,1), locs(:,2), '-o', 'MarkerSize', 3); axis equal;
+title('Trajectoire estimée (um)'); xlabel('x (um)'); ylabel('y (um)');
+
+figure;
+plot(taus*dt, msd, 'o'); hold on;
+tfit = linspace(min(taus)*dt, max(taus)*dt, 100);
+slope = (2*2)*D_hat; % 2*dim*D (dim=2)
+plot(tfit, slope * tfit + intercept, '-');
+xlabel('tau (s)'); ylabel('MSD (um^2)'); legend('MSD data','Fit'); title('MSD & fit');
+grid on;
+
 end
 
-function Z = psf_airy_on_pixel_grid(xc, yc, alpha_pixels, roi_size)
-    % Return continuous Airy PSF (using Bessel function) sampled on a roi grid centered at (xc,yc) in pixel coordinates.
-    % xc,yc may be non-integer. alpha_pixels is the scaling factor for the argument of the Bessel function.
-    % The Airy PSF is I(r) = [2 * J1(alpha * r) / (alpha * r)]^2, normalized to sum=1.
-    s = roi_size;  % Store the ROI size
-    [X, Y] = make_grid(s, 1.0);  % Get the meshgrid for the ROI (pixel_size=1 since we're in pixel coords)
-    r = sqrt((X - xc).^2 + (Y - yc).^2);  % Compute radial distance from center
-    Z = zeros(size(r));  % Initialize array
-    mask = r > 0;  % Mask for r > 0 to avoid division by zero
-    Z(mask) = (2 * besselj(1, alpha_pixels * r(mask)) ./ (alpha_pixels * r(mask))) .^ 2;  % Compute Airy for r > 0
-    Z(~mask) = 1.0;  % At r=0, limit is 1
-    Z = Z / sum(Z(:));  % Normalize so the sum of the PSF is 1 (probability distribution)
+%% ----------------- Fonctions utilitaires -----------------
+
+function g = gaussian2d_vec(p, X, Y)
+% p = [A, x0, y0, sigma, offset]
+A = p(1); x0 = p(2); y0 = p(3); sigma = p(4); offset = p(5);
+g = A .* exp(-((X - x0).^2 + (Y - y0).^2) / (2*sigma^2)) + offset;
 end
 
-function pos = simulate_trajectory(D, N_frames, dt)
-    % Simulate 2D Brownian trajectory. D in um^2/s, dt in s.
-    sigma_step = sqrt(2 * D * dt);  % Standard deviation of each step: sqrt(2*D*dt)
-    steps = sigma_step * randn(N_frames, 2);  % Generate Gaussian random steps for x and y
-    pos = cumsum(steps, 1);  % Cumulative sum to get positions over time
+function [X, Y] = make_grid(roi_size)
+% coordonnees centrees (matrice sry x srx)
+coords = (0:roi_size-1) - (roi_size-1)/2;
+[X, Y] = meshgrid(coords, coords);
 end
 
-function shot = render_frame(position_um, params)
-    % Render image frame (2D array) for a single particle at position (um).
-    % The image created is full sensor patch of size (roi_size x roi_size) pixels.
-    % Unpack params
-    M = params.magnification;  % Optical magnification
-    pixel_size_sensor = params.pixel_size_sensor;  % Pixel size on the sensor in um
-    roi_size = params.roi_size;  % Size of the ROI in pixels (odd number)
-    lambda_um = params.lambda_um;  % Wavelength in um
-    NA = params.NA;  % Numerical aperture
-    photons_per_frame = params.photons_per_frame;  % Total photons from particle per frame
-    background = params.background;  % Background photons per pixel
-    read_noise = params.read_noise;  % Read noise in electrons RMS
+function psf = psf_airy_on_pixel_grid(xc, yc, lambda, NA, M, pixel_size_sensor, roi_size)
+[X, Y] = make_grid(roi_size);
+r_pix = sqrt((X - xc).^2 + (Y - yc).^2);
+pixel_size_obj = pixel_size_sensor / M; % um/pixel in object plane
+r_obj = r_pix * pixel_size_obj; % um
+k = 2 * pi * NA / lambda; % rad/um
+v = k * r_obj;
+Z = (2 * besselj(1, v) ./ v) .^ 2;
+Z(v == 0) = 1; % limit as v -> 0
+Zsum = sum(Z(:));
+if Zsum == 0
+    psf = ones(size(Z)) / numel(Z);
+else
+    psf = Z / Zsum;
+end
+end
 
-    % Convert position (um in object plane) to pixel coords in image plane
-    % We'll place ROI center at (0,0) in object plane; the particle position is relative to ROI center
-    x_obj = position_um(1);  % Unpack object plane position in um
-    y_obj = position_um(2);
-    % image plane displacement in um = M * x_obj
-    x_img_um = M * x_obj;  % Scale x by magnification
-    y_img_um = M * y_obj;  % Scale y by magnification
-    % convert to pixels on sensor
-    x_pix = x_img_um / pixel_size_sensor;  % Convert to pixel coordinates
-    y_pix = y_img_um / pixel_size_sensor;
+function traj = simulate_trajectory(D, N_frames, dt)
+% D in um^2/s, dt in s
+sigma_step = sqrt(2 * D * dt);
+steps = sigma_step .* randn(N_frames,2);
+traj = cumsum(steps,1);
+end
 
-    % Compute the scaling factor alpha_obj = 2 * pi * NA / lambda_um (in 1/um)
-    alpha_obj = 2 * pi * NA / lambda_um;
-    % Convert to pixels: alpha_pixels = alpha_obj * (pixel_size_sensor / M)
-    % Because r_obj = r_pixels * pixel_size_sensor / M
-    alpha_pixels = alpha_obj * pixel_size_sensor / M;
+function frame = render_frame(position_um, params)
+% position_um: [x,y] en um dans le plan objet, centre ROI est (0,0)
+M = params.magnification;
+pixel_size_sensor = params.pixel_size_sensor; % um
+roi_size = params.roi_size;
+lambda = params.lambda; % um
+NA = params.NA;
+photons_per_frame = params.photons_per_frame;
+background = params.background;
+read_noise = params.read_noise;
 
-    % For convenience we create PSF centered at (x_pix, y_pix) relative to ROI center
-    xc = x_pix;  % Center in pixels relative to ROI
-    yc = y_pix;
+x_obj = position_um(1);
+y_obj = position_um(2);
+x_img_um = M * x_obj;
+y_img_um = M * y_obj;
+x_pix = x_img_um / pixel_size_sensor;
+y_pix = y_img_um / pixel_size_sensor;
 
-    psf = psf_airy_on_pixel_grid(xc, yc, alpha_pixels, roi_size);  % Generate normalized PSF
-    % scale to total photons
-    expected = photons_per_frame * psf + background;  % Expected signal: photons from PSF + background
-    % Poisson shot noise
-    shot = poissrnd(expected);  % Apply Poisson noise to simulate photon counting
-    % Add Gaussian read noise (in electrons)
-    shot = shot + read_noise * randn(size(shot));  % Add read noise
-    % Ensure non-negative
-    shot(shot < 0) = 0;  % Clip negative values to zero (as intensities can't be negative)
+psf = psf_airy_on_pixel_grid(x_pix, y_pix, lambda, NA, M, pixel_size_sensor, roi_size);
+expected = photons_per_frame * psf + background;
+
+% Poisson shot noise (poissrnd) puis lecture bruit gaussien
+try
+    shot = poissrnd(expected); % requires Statistics Toolbox
+catch
+    % approximation gaussienne (ok si expected grand)
+    shot = max(0, expected + sqrt(max(expected,0)) .* randn(size(expected)));
+end
+shot = double(shot) + read_noise .* randn(size(expected));
+shot(shot < 0) = 0;
+frame = shot;
 end
 
 function [x_abs, y_abs, sigma_r, A, offset, pcov] = localize_gaussian(image, roi_center, roi_size)
-    % Localize a single particle by fitting a 2D gaussian on a cropped ROI around maximum.
-    % Returns (x0_pix, y0_pix, sigma_pix, A, offset) relative to ROI center coordinates (pixels).
-    % Note: Even though PSF is now Airy, we still approximate with Gaussian for localization, as is common practice.
-    if nargin < 2 || isempty(roi_center)
-        % default: use global maximum
-        [~, max_idx] = max(image(:));
-        [cy, cx] = ind2sub(size(image), max_idx);  % Unpack y, x (note: images are (row, col) = (y, x)
+% Localise un pic par fit gaussien 2D sur une ROI centrée autour du max (ou roi_center)
+% Retourne coords absolues en pixels (0-based apparent converti ci-dessous)
+
+if nargin < 2 || isempty(roi_center)
+    [~, idx] = max(image(:));
+    [cy, cx] = ind2sub(size(image), idx);
+else
+    cx = round(roi_center(1));
+    cy = round(roi_center(2));
+end
+
+half = floor((roi_size-1)/2);
+[ny, nx] = size(image);
+x0 = round(cx); y0 = round(cy);
+x1 = max(1, x0 - half);
+x2 = min(nx, x0 + half);
+y1 = max(1, y0 - half);
+y2 = min(ny, y0 + half);
+roi = double(image(y1:y2, x1:x2));
+
+[sry, srx] = size(roi);
+[X, Y] = meshgrid((0:srx-1) - (srx-1)/2, (0:sry-1) - (sry-1)/2);
+
+% initial guesses
+A0 = max(roi(:)) - median(roi(:));
+x0_guess = 0.0;
+y0_guess = 0.0;
+sigma_guess = 1.5;
+offset0 = median(roi(:));
+p0 = [A0, x0_guess, y0_guess, sigma_guess, offset0];
+
+lb = [0, -5, -5, 0.2, 0];
+ub = [Inf, 5, 5, 10, Inf];
+
+ydata = roi(:);
+pcov = NaN(5,5);
+
+try
+    if exist('lsqcurvefit','file') == 2
+        opts = optimoptions('lsqcurvefit','Display','off','MaxFunctionEvaluations',5000);
+        % lsqcurvefit expects fun(p,xdata) so on passe un xdata dummy (~) et on ignore
+        fun = @(p,~) gaussian2d_lsq(p, srx, sry);
+        pfit = lsqcurvefit(fun, p0, [], ydata, lb, ub, opts);
+        pcov = NaN(5,5); % calcul de covariance demanderait jacobienne (non calculée ici)
     else
-        cx = roi_center(1);
-        cy = roi_center(2);
+        error('lsqcurvefit not available');
     end
-
-    % crop ROI
-    half = floor((roi_size - 1)/2);  % Half size for cropping
-    [ny, nx] = size(image);  % Get image dimensions
-    x0 = round(cx);  % Round to nearest integer for cropping
-    y0 = round(cy);
-    x1 = max(1, x0 - half);  % Left boundary (MATLAB 1-indexed)
-    x2 = min(nx, x0 + half);  % Right boundary
-    y1 = max(1, y0 - half);  % Top boundary
-    y2 = min(ny, y0 + half);  % Bottom boundary
-    roi = double(image(y1:y2, x1:x2));  % Crop and convert to double
-
-    % Create meshgrid for ROI coordinates (in pixels) centered at ROI center
-    [nrows, ncols] = size(roi);
-    [X, Y] = meshgrid((1:ncols) - (ncols+1)/2, (1:nrows) - (nrows+1)/2);  % Centered coordinates
-    xy = [X(:), Y(:)];  % For lsqcurvefit
-
-    % initial guesses
-    A0 = max(roi(:)) - median(roi(:));  % Amplitude guess: max - median
-    x0_guess = 0.0;  % Initial center at 0 (relative to ROI center)
-    y0_guess = 0.0;
-    sigma_guess = 1.5;  % Typical PSF width in pixels
-    offset0 = median(roi(:));  % Background offset
-    p0 = [A0, x0_guess, y0_guess, sigma_guess, offset0];  % Initial parameter vector
-
-    % bounds: A>0, sigma>0
-    lb = [0, -5, -5, 0.2, 0];  % Lower bounds for parameters
-    ub = [Inf, 5, 5, 10, Inf];  % Upper bounds
-
-    options = optimoptions('lsqcurvefit', 'MaxIterations', 5000, 'Display', 'off');
-    try
-        [popt, ~, residual, ~, ~, ~, jacobian] = lsqcurvefit(@gaussian2d, p0, xy, roi(:), lb, ub, options);
-        pcov = inv(jacobian' * jacobian) * (residual' * residual) / (length(roi(:)) - length(p0));  % Approximate covariance
-        perr = sqrt(diag(pcov));  % Parameter errors from covariance diagonal
-    catch
-        % fallback to centroid if fit fails
-        total = sum(roi(:));  % Total intensity
-        if total <= 0  % If no signal,
-            x_abs = []; y_abs = []; sigma_r = []; A = []; offset = []; pcov = [];
-            return;
-        end
-        % Compute centroid for x and y
-        cx_cent = sum(sum(roi .* (1:size(roi,2)) - (size(roi,2)+1)/2)) / total;
-        cy_cent = sum(sum(roi .* ((1:size(roi,1))' - (size(roi,1)+1)/2))) / total;
-        popt = [max(roi(:))-median(roi(:)), cx_cent, cy_cent, 1.5, median(roi(:))];  % Use centroid as fallback
-        perr = NaN(1,5);  % NaN errors
-        pcov = NaN(5);  % NaN covariance
+catch
+    % fallback: centroid si le fit échoue ou toolbox absente
+    total = sum(roi(:));
+    if total <= 0
+        x_abs = NaN; y_abs = NaN; sigma_r = NaN; A = NaN; offset = NaN; pcov = NaN(5,5);
+        return;
     end
+    sumx = sum(roi,1); % vector length srx
+    sumy = sum(roi,2); % vector length sry
+    cx_cent = sum( ((0:srx-1) - (srx-1)/2) .* sumx ) / total;
+    cy_cent = sum( ((0:sry-1)' - (sry-1)/2) .* sumy ) / total;
+    pfit = [A0, cx_cent, cy_cent, sigma_guess, offset0];
+    pcov = NaN(5,5);
+end
 
-    A = popt(1); x0r = popt(2); y0r = popt(3); sigma_r = popt(4); offset = popt(5);  % Unpack optimized parameters
-    % coordinates relative to full image origin:
-    x_abs = (x1 - 1) + (x0r + (size(roi,2) - 1)/2.0 + 1);  % Convert relative to absolute x (1-indexed adjust)
-    y_abs = (y1 - 1) + (y0r + (size(roi,1) - 1)/2.0 + 1);  % Convert relative to absolute y
+% Extraire paramètres et convertir en coordonnées absolues (pixels)
+A = pfit(1); x0r = pfit(2); y0r = pfit(3); sigma_r = pfit(4); offset = pfit(5);
+% x1,y1 sont indices MATLAB (1-based) du coin supérieur gauche du patch
+% on veut le coordonnée en pixels relative à l'image (0-based style)
+x_abs = (x1 - 1) + (x0r + (srx-1)/2);
+y_abs = (y1 - 1) + (y0r + (sry-1)/2);
+
+end
+
+function y = gaussian2d_lsq(p, srx, sry)
+% helper: return column vector correspondant à un patch de taille sry x srx
+[X, Y] = meshgrid((0:srx-1) - (srx-1)/2, (0:sry-1) - (sry-1)/2);
+y = gaussian2d_vec(p, X, Y);
+y = y(:);
 end
 
 function [taus, msd] = compute_msd(positions, max_lag)
-    % positions: array (N,2) with x,y in um. Return msd array for lags 1..max_lag (in frames).
-    N = size(positions,1);  % Number of positions
-    if nargin < 2 || isempty(max_lag)
-        max_lag = floor(N/4);  % Use N/4 as default
-    end
-    msd = zeros(max_lag,1);  % Initialize MSD array
-    for lag = 1:max_lag  % For each lag,
-        diffs = positions(lag+1:end,:) - positions(1:end-lag,:);  % Compute displacements
-        sq = sum(diffs.^2, 2);  % Squared displacements
-        msd(lag) = mean(sq);  % Mean for this lag
-    end
-    taus = (1:max_lag)';  % Lag times in frames
+% positions Nx2 en um
+N = size(positions,1);
+if nargin < 2 || isempty(max_lag)
+    max_lag = floor(N/4);
+end
+msd = zeros(max_lag,1);
+for lag = 1:max_lag
+    diffs = positions(lag+1:end,:) - positions(1:end-lag,:);
+    sq = sum(diffs.^2,2);
+    msd(lag) = mean(sq);
+end
+taus = (1:max_lag)';
 end
 
 function [D_hat, intercept, cov_beta, se_D] = fit_msd_linear(taus, msd, dt, dim)
-    % Fit msd = 2*dim*D*tau*dt + C  (taus are in frames)
-    % Return D_hat, C_hat, and covariance of slope/intercept.
-    if nargin < 4
-        dim = 2;
-    end
-    t = taus * dt;  % Convert lags to time in seconds
-    % linear regression: msd = slope * t + intercept; slope = 2*dim*D
-    X = [t, ones(size(t))];  % Design matrix for linear fit
-    % Ordinary least squares
-    beta = X \ msd;  % Solve for beta (slope, intercept)
-    slope = beta(1);
-    intercept = beta(2);
-    % estimate variance of residuals
-    n = length(msd);  % Number of data points
-    if n > 2  % If enough points,
-        residuals = msd - X * beta;  % Compute residuals
-        sigma2 = sum(residuals.^2) / (n - 2);  % Variance estimate
-        cov_beta = sigma2 * inv(X' * X);  % Covariance matrix
-    else
-        cov_beta = NaN(2);  % NaN if not enough points
-    end
-    D_hat = slope / (2 * dim);  % Estimate D from slope
-    % standard errors:
+% Fit msd = 2*dim*D*t + C
+t = taus * dt;
+X = [t ones(size(t))];
+beta = X \ msd;
+slope = beta(1); intercept = beta(2);
+n = length(msd);
+if n > 2
+    residuals = msd - X*beta;
+    sigma2 = sum(residuals.^2) / (n - 2);
+    cov_beta = sigma2 * inv(X'*X);
+else
+    cov_beta = NaN(2,2);
+end
+D_hat = slope / (2*dim);
+if ~any(isnan(cov_beta(:)))
     se_slope = sqrt(cov_beta(1,1));
-    se_D = se_slope / (2 * dim);
+    se_D = se_slope / (2*dim);
+else
+    se_D = NaN;
 end
-
-% ---- Paramètres par défaut ----
-% Define default parameters for the simulation in a struct
-params = struct( ...
-    'magnification', 60.0, ...           % x60 objective with 150 mm tube lens as example
-    'pixel_size_sensor', 2.4, ...        % um (Raspberry Pi HQ cam typical pixel ~1.55 um, example 2.4)
-    'roi_size', 21, ...                  % pixels (odd)
-    'lambda_um', 0.520, ...              % Wavelength in um (green light example)
-    'NA', 0.8, ...                       % Numerical aperture of the objective
-    'photons_per_frame', 800.0, ...      % photons collected from particle per frame (tunable)
-    'background', 5.0, ...               % photons/pixel background
-    'read_noise', 1.5, ...               % electrons RMS
-    'gain', 1.0 ...                      % e-/ADU (not used)
-);
-
-function example_run()
-    % This function runs an example simulation: generates trajectory, renders frames, localizes, computes MSD, fits D, estimates radius.
-    % Simulation scenario
-    T_frames = 200;  % Number of frames
-    dt = 0.05;  % s (frame interval)  % Time between frames in seconds
-    D_true = 0.5;  % um^2/s (example)  % True diffusion coefficient
-    % Simulate a trajectory (in um)
-    traj = simulate_trajectory(D_true, T_frames, dt);  % Generate Brownian trajectory
-    % center the trajectory in the ROI (so pixel coords don't go out of bounds)
-    % we will shift positions so that mean position ~ 0 (ROI center)
-    traj = traj - mean(traj,1);  % Subtract mean to center trajectory
-
-    % Render frames and localize
-    images = cell(1, T_frames);  % List to store rendered images
-    locs = zeros(T_frames, 2);  % Array to store localized positions
-    for i = 1:T_frames  % For each frame,
-        frame = render_frame(traj(i,:), params);  % Render the image
-        images{i} = frame;  % Store image
-        % localize in pixel coordinates (need full image; our render returns ROI directly)
-        % For simplicity, assume ROI axis center corresponds to object plane origin, and we localize within it:
-        [x_abs, y_abs, sigma_r, A, offset, pcov] = localize_gaussian(frame, [], params.roi_size);  % Localize particle
-        % convert back to object-plane um coords:
-        % x_abs,y_abs are pixel coords relative to ROI full image; compute offset from ROI center in pixels
-        center_pix = (params.roi_size - 1)/2.0;  % Center pixel index
-        dx_pix = x_abs - center_pix - 1;  % Offset in x pixels (adjust for 1-indexing)
-        dy_pix = y_abs - center_pix - 1;  % Offset in y pixels
-        % convert to object plane um (divide by M and multiply by pixel_size_sensor)
-        dx_um = dx_pix * params.pixel_size_sensor / params.magnification;  % Convert to um in object plane
-        dy_um = dy_pix * params.pixel_size_sensor / params.magnification;
-        % absolute object's position estimate (since we had placed true traj relative to ROI center)
-        est_pos = [dx_um, dy_um];  % Estimated position
-        locs(i,:) = est_pos;  % Store
-    end
-
-    % compute msd
-    [taus, msd] = compute_msd(locs, 50);  % Compute MSD up to lag 50
-
-    [D_hat, intercept, cov_beta, se_D] = fit_msd_linear(taus, msd, dt, 2);  % Fit to estimate D
-
-    % Convert D_hat to radius via Stokes-Einstein (note units)
-    % D in um^2/s -> convert to m^2/s for Stokes-Einstein
-    D_hat_m2s = D_hat * 1e-12;  % Convert um^2/s to m^2/s
-    T_kelvin = 293.15;  % 20 C  % Temperature in Kelvin
-    eta = 1.0e-3;       % Pa.s (water)  % Viscosity of water
-    r_hat_m = kB * T_kelvin / (6 * pi * eta * D_hat_m2s);  % Stokes-Einstein: r = kT / (6 pi eta D)
-    r_hat_um = r_hat_m * 1e6;  % Convert to um
-    % uncertainty
-    sigma_D = se_D;  % Standard error of D
-    sigma_D_m2s = sigma_D * 1e-12;  % Convert to m^2/s
-    sigma_r_m = (kB * T_kelvin / (6 * pi * eta)) * sigma_D_m2s / (D_hat_m2s^2);  % Propagate error to r (if D>0)
-    sigma_r_um = sigma_r_m * 1e6;  % Convert to um
-
-    % Print results
-    fprintf('True D (um^2/s): %f\n', D_true);  % Print true D
-    fprintf('Estimated D_hat (um^2/s): %.4f +- %.4f\n', D_hat, sigma_D);  % Print estimated D with error
-    fprintf('Intercept (should reflect 4*sigma_loc^2) : %f\n', intercept);  % Print intercept (related to localization variance)
-    fprintf('Estimated radius r (um): %.3f +- %.3f\n', r_hat_um, sigma_r_um);  % Print estimated radius with error
-
-    % Plots
-    figure('Position', [100, 100, 500, 400]);  % Create figure for trajectory plot
-    plot(locs(:,1), locs(:,2), '-o', 'MarkerSize', 2);  % Plot x vs y
-    axis equal;  % Equal aspect ratio
-    title('Trajectory estimée (um)');  % Title
-    xlabel('x (um)'); ylabel('y (um)');  % Labels
-
-    figure('Position', [600, 100, 500, 400]);  % Create figure for MSD plot
-    plot(taus*dt, msd, 'o', 'DisplayName', 'MSD data');  % Plot MSD points
-    hold on;
-    tfit = linspace(min(taus*dt), max(taus*dt), 50);  % Time points for fit line
-    slope = (2*2)*D_hat;  % 2*dim*D  % Slope for fit
-    intercept_val = intercept;  % Intercept
-    plot(tfit, slope * tfit + intercept_val, '-', 'DisplayName', 'Fit');  % Plot fit line
-    xlabel('tau (s)');  % X label
-    ylabel('MSD (um^2)');  % Y label
-    legend;  % Legend
-    title('MSD & fit');  % Title
 end
-
-% Run the example
-example_run();
