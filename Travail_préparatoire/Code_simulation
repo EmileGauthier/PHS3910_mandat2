@@ -29,19 +29,33 @@
 
 % Étape 1 : simuler la position d'une particule en mouvement brownien. 
 
-% 1.1 - D théorique : 
-r_true = 1E-6 ; % Vraie taille de la particule! Rayon d'un micron --> trop grand?
+% 1.1 - Coefficient de diffusion D théorique (pour simuler le mouvement)
+r_real = 1E-6 ; % Taille réelle de la particule
 
-k_b = 1.380649E-23 ; % en J/K
-temp = 293 ; % en K, = 20 degrés Celsius, approx.
-eta = 1E-3 ; % viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
-D_theo = (k_b * temp) / (6 * pi * eta * r_true) ; 
+k_b = 1.380649E-23 ; % Constante de Boltzmann (J/K)
+temp = 293 ; % Température absolue du fluide (K)
+eta = 1E-3 ; % Viscosité dynamique du fluide
+% La viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
+D_real = (k_b * temp) / (6 * pi * eta * r_real) ; % Coefficient de diffusion (m^2/s)
 
-delta_t = 0.1 ; % 1 ms entre chaque frame? 
+delta_t = 0.1e-3 ; % Délai entre chaque frame (1 ms entre chaque frame?)
+
+grossissement = 20; % Magnification du système optique
+NA = 1.33; % Ouverture numérique
+lmda = 500e-9; % Longueur d'onde captée (m)
+pixel_camera = 1.55e-6; % Taille du pixel (m)
+n_pixels_camera = [4056;3040]; % Dimensions du détecteur (pixel)
+
+pixel_objet = pixel_camera / grossissement; % Taille du pixel dans l'espace objet
+
+% Maillage dans l'espace image
+x_im = 0:pixel_camera:(n_pixels_camera(1)-1)*pixel_camera;
+y_im = 0:pixel_camera:(n_pixels_camera(2)-1)*pixel_camera;
+[X_im,Y_im] = meshgrid(x_im,y_im);
 
 % 1.2 - Mouvement brownien pour chaque frame : 
 
-function [x2, y2] = brownien(x1, y1, D_theo, delta_t)
+function [x2, y2] = brownien(x1, y1, D_real, delta_t)
 
 % Définition de la fonction "brownien" : 
 %   Paramètres sortie : x2 et y2 les coordonnées réelles de la particule.
@@ -49,47 +63,51 @@ function [x2, y2] = brownien(x1, y1, D_theo, delta_t)
 %                       D le coefficient de diffusion théorique;
 %                       delta_t le temps entre chaque frame;
 %                       
-%                       Optionnel : N pour direct retourner un vecteur de N
-%                       positions???
 
-% X = randn returns a random scalar drawn from the standard normal distribution.
+% X = randn retourne un scalaire à partir de la distribution normale
 
 
 % Calculer les déplacements aléatoires en fonction du coefficient de diffusion
-sigma = sqrt(2 * D_theo * delta_t); % Écart type du mouvement brownien
+sigma = sqrt(2 * D_real * delta_t); % Écart type du mouvement brownien
 x2 = x1 + sigma * randn; % Nouvelle position x
 y2 = y1 + sigma * randn; % Nouvelle position y
 
 end 
 
-% Si on veut pour N positions : 
-N = 100; % Nombre de positions à simuler
+N = 1000; % Nombre de pas de temps à simuler
 x_positions = zeros(1, N); % Initialiser le vecteur des positions x
 y_positions = zeros(1, N); % Initialiser le vecteur des positions y
 x_positions(1) = 0; % Position initiale x, mettons 0.
 y_positions(1) = 0; % Position initiale y, mettons 0.
 
 for i = 2:N
-    [x_positions(i), y_positions(i)] = brownien(x_positions(i-1), y_positions(i-1), D_theo, delta_t);
+    [x_positions(i), y_positions(i)] = brownien(x_positions(i-1), y_positions(i-1), D_real, delta_t);
 end
-
-%x_positions
-%y_positions
-
-%plot(x_positions,y_positions,'b-o');
-%legend('mouvement brownien')
-
 
 % -------------------------------------------------------------------------
 
 % Étape 2 - Simuler une photo réaliste à partir de cette position
 % (connaissant cette position) --> PSF  et Poisson.
 
-function psf = psf_theo(x, y, NA, lambda)
+function psf = psf_convolve(x, y, X_im, Y_im, NA, lmda)
+%   Paramètres sorties : psf - Maillage 2D correspondant à la convolution
+%   du delta Dirac à la position x,y avec la fonction psf.
+    r = sqrt((X_im - x).^2 + (Y_im - y).^2);
+    temp = (2 .* pi .* NA .* r)./lmda;
+    psf = (2*besselj(1,temp) ./ temp).^2;
 
-    % 2.1 - Créer la grille (pour pixéliser --> dépend taille pixel)
-    
+end
 
+% psf = psf_convolve(100*pixel_camera,200*pixel_camera,X_im,Y_im,NA,lmda);
+% mesh(X_im(150:250,50:150),Y_im(150:250,50:150),psf(150:250,50:150))
+
+function intensity_mesh = intensity_mesh_fun(x, y, NA, lambda, X_im, Y_im)
+ 
+%   Paramètres sortie : psf - Maillage 2d de l'intensité
+%   Paramètres entrée : x et y - Coordonnées réelles de la particule.
+%                       D le coefficient de diffusion théorique;
+%                       delta_t le temps entre chaque frame;
+%    
 
     % 2.2 - Générer la PSF discrétisée sur la grille, avec la formule puis
     % la convolution
