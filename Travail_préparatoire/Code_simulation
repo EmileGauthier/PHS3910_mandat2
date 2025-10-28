@@ -27,7 +27,9 @@
 
 % Code : 
 
+% ===================================================================
 % Étape 1 : simuler la position d'une particule en mouvement brownien. 
+% ===================================================================
 
 % 1.1 - Coefficient de diffusion D théorique (pour simuler le mouvement)
 r_real = 1E-6 ; % Taille réelle de la particule
@@ -86,8 +88,10 @@ end
 
 % -------------------------------------------------------------------------
 
+% ===================================================================
 % Étape 2 - Simuler une photo réaliste à partir de cette position
 % (connaissant cette position) --> PSF  et Poisson.
+% ===================================================================
 
 function psf = psf_convolve(x, y, X_im, Y_im, NA, lmda)
 %   Paramètres sorties : psf - Maillage 2D correspondant à la convolution
@@ -117,6 +121,8 @@ function intensity_mesh = intensity_mesh_fun(x, y, NA, lambda, X_im, Y_im)
 
 end
 
+% ===================================================================
+% Étape 3 - Fit gaussien
 % ===================================================================
 
 % 3.1 - Fonction qui estime l'écart-type pour le guess initial du fit
@@ -212,15 +218,19 @@ end
 
 % Exemple : 
 
-% Create synthetic data
-[X, Y] = meshgrid(-5:0.2:5, -5:0.2:5); % Nous aussi il nous faudra ça mais une grille de pixels
-%Ztrue = 3 * exp(-((X-1).^2/(2*1.2^2) + (Y+0.5).^2/(2*0.8^2))) + 0.5;
-%Z = Ztrue + 0.05*randn(size(Ztrue));  % add some noise
+% Faut une mesh de positions sur laquelle appliquer le fit, qui sera les positions de pixels de l'image. 
+% En matlab, les indices de pixel dans une image vont de 1 à N. Notre caméra a des images 4056 par 3040.
+[X, Y] = meshgrid(1:1:4056, 1:1:3040); 
+% Mais attention, s'assurer que cette grille est cohérente avec Z (la matrice des intensités de l'image).
+
 
 % Fit
 params = fit2DGaussian(X, Y, Z);
+% On veut x et y les positions du centre, même pas besoin des écarts-type.
+x_i = params(2)
+y_i = params(3)
 
-% Plot result
+% Plot result (optionnel)
 Zfit = params(1) * exp(-((X - params(2)).^2/(2*params(4)^2) + (Y - params(3)).^2/(2*params(5)^2))) + params(6);
 
 figure;
