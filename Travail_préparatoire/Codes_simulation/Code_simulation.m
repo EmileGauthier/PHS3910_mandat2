@@ -1,0 +1,47 @@
+% Paramètres de la particule
+N_step = 2; % Nombre de pas de temps par marche aléatoire
+N_photons = 1000; % Nombre de photons reçu par la caméra par position de particules
+r_real = 1E-6 ; % Taille réelle de la particule
+
+% Constantes physiques
+k_b = 1.380649E-23 ; % Constante de Boltzmann (J/K)
+T = 293 ; % Température absolue du fluide (K)
+eta = 1E-3 ; % Viscosité dynamique du fluide
+% La viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
+D_real = (k_b * T) / (6 * pi * eta * r_real) ; % Coefficient de diffusion (m^2/s)
+
+% Paramètres de la caméra
+delta_t = 0.1e-3 ; % Délai entre chaque frame (1 ms entre chaque frame?)
+grossissement = 20; % Magnification du système optique
+NA = 1.33; % Ouverture numérique
+lmda = 500e-9; % Longueur d'onde captée (m)
+pixel_camera = 1.55e-6; % Taille du pixel (m)
+n_pixels_camera = [4056;3040]; % Dimensions du détecteur (pixel)
+pixel_objet = pixel_camera / grossissement; % Taille du pixel dans l'espace objet
+
+% Maillage dans l'espace image
+x_im = 0:pixel_camera:(n_pixels_camera(1)-1)*pixel_camera;
+y_im = 0:pixel_camera:(n_pixels_camera(2)-1)*pixel_camera;
+[X_im,Y_im] = meshgrid(x_im,y_im);
+
+x_positions = zeros(1, N_step); % Initialiser le vecteur des positions x
+y_positions = zeros(1, N_step); % Initialiser le vecteur des positions y
+x_positions(1) = n_pixels_camera(1)/2 * pixel_camera; % Position initiale de la particule en x.
+y_positions(1) = n_pixels_camera(2)/2 * pixel_camera; % Position initiale de la particule en y.
+
+x_guess = zeros(1, N_step); % Initialiser le vecteur des positions x
+y_guess = zeros(1, N_step); % Initialiser le vecteur des positions y
+
+for i = 2:N_step
+    % Calculer une position
+    [x_positions(i), y_positions(i)] = brownien(x_positions(i-1), y_positions(i-1), D_real, delta_t);
+
+    % Création d'une image réelle
+    image2D = real_image(x_positions(i), y_positions(i),X_im, Y_im, NA, lmda, N_photons,pixel_camera,n_pixels_camera);
+    
+    bar3(image2D(1510:1530,2020:2040))
+
+    % Localisation de la particule
+    param = fit2DGaussian(X_im, Y_im, image2D);
+end
+
