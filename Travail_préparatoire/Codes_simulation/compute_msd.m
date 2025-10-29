@@ -2,6 +2,9 @@
 % MSD
 
 function results_msd = compute_msd(positions, max_lag)
+% fonction créée par chatgpt puis modifiée par l'équipe.
+% Output : results_msd = [taus, msd], deux vecteur colonnes.
+
 % taus : vecteur contenant les entiers des lag times, allant de 1 à max_lag
 % (correspond à l'axe x du graphique de l'énoncé)
 % msd : vecteur contenant les valeurs du msd, correspond aux valeurs y du
