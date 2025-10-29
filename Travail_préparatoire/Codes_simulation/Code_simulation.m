@@ -47,4 +47,9 @@ for i = 2:N_step
     y_guess(i) = param(3)
 end
 
+pos_guess = [x_guess', y_guess']
+res_msd = compute_msd(pos_guess) % Ajouter le paramètres max_lag si besoin, mais par défaut : N/4. 
+% res_msd = [taus, msd] des vecteurs colonne.
+
+D_exp = fit_msd_linear(res_msd(1), res_msd(2), delta_t)
 
