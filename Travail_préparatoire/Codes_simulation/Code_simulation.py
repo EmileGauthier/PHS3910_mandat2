@@ -296,6 +296,22 @@ def real_image(x, y, X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixel_came
 
     return image2D
 
+def brownien(x1, y1, D_real, delta_t):
+    """
+    Définition de la fonction "brownien" :
+        Paramètres sortie : x2 et y2 les coordonnées réelles de la particule.
+        Paramètres entrée : x1 et y1 les coordonnées initiales de la particule;
+                            D_real le coefficient de diffusion théorique;
+                            delta_t le temps entre chaque frame;
+    """
+
+    # Calculer les déplacements aléatoires en fonction du coefficient de diffusion
+    sigma = np.sqrt(2 * D_real * delta_t)  # Écart type du mouvement brownien
+    x2 = x1 + sigma * np.random.randn()    # Nouvelle position x
+    y2 = y1 + sigma * np.random.randn()    # Nouvelle position y
+
+    return x2, y2
+
 
 """
 =======================================================================
