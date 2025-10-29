@@ -20,7 +20,7 @@ n_pixels_camera = [4056;3040]; % Dimensions du détecteur (pixel)
 pixel_objet = pixel_camera / grossissement; % Taille du pixel dans l'espace objet
 
 % Maillage dans l'espace image
-x_im = 0:pixel_camera:(n_pixels_camera(1)-1)*pixel_camera;
+x_im = 0:pixel_camera:(n_pixels_camera(1)-1)*pixel_camera; % Yo watch out pcq matlab commence à 1...
 y_im = 0:pixel_camera:(n_pixels_camera(2)-1)*pixel_camera;
 [X_im,Y_im] = meshgrid(x_im,y_im);
 
@@ -43,5 +43,8 @@ for i = 2:N_step
 
     % Localisation de la particule
     param = fit2DGaussian(X_im, Y_im, image2D);
+    x_guess(i) = param(2)
+    y_guess(i) = param(3)
 end
+
 
