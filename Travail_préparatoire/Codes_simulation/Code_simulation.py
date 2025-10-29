@@ -63,6 +63,201 @@ def fit_msd_linear(taus, msd, dt):
 
     return D_exp
 
+from scipy.optimize import curve_fit
+from scipy.interpolate import interp1d
+
+def fit2D_gaussian(X, Y, Z): # À tester...
+    """
+    Perform a 2D Gaussian fit on an image.
+    Généré par chatgpt.
+
+    Parameters
+    ----------
+    X : 1D array
+        x coordinates of the grid
+    Y : 1D array
+        y coordinates of the grid
+    Z : 2D array
+        Image intensity matrix, shape (len(Y), len(X))
+
+    Returns
+    -------
+    popt : list
+        Best-fit parameters [A, x0, y0, sx, sy, offset]
+    """
+
+    # Create meshgrid if needed (to get coordinate matrices)
+    Xg, Yg = np.meshgrid(X, Y)
+
+    # --- 1. Initial guesses ---
+    max_idx = np.unravel_index(np.argmax(Z), Z.shape)
+    y0_0 = Y[max_idx[0]]  # row index → Y position
+    x0_0 = X[max_idx[1]]  # column index → X position
+    A0 = Z[max_idx]       # peak amplitude
+    offset0 = np.min(Z)
+
+    # --- 2. Estimate sx0 and sy0 from FWHM along x and y profiles ---
+    def fwhm_to_sigma(coord, profile):
+        """Estimate standard deviation from FWHM using interpolation."""
+        half_max = np.max(profile) / 2.0
+        imax = np.argmax(profile)
+
+        # Left crossing
+        if imax > 0:
+            try:
+                f_left = interp1d(profile[:imax+1], coord[:imax+1], kind='linear')
+                xl = f_left(half_max)
+            except ValueError:
+                xl = coord[0]
+        else:
+            xl = coord[0]
+
+        # Right crossing
+        if imax < len(profile) - 1:
+            try:
+                f_right = interp1d(profile[imax:], coord[imax:], kind='linear')
+                xr = f_right(half_max)
+            except ValueError:
+                xr = coord[-1]
+        else:
+            xr = coord[-1]
+
+        fwhm = abs(xr - xl)
+        return fwhm / (2 * np.sqrt(2 * np.log(2)))  # σ = FWHM / 2.35482
+
+    # x-profile at the peak row
+    xprof = Z[max_idx[0], :]
+    sx0 = fwhm_to_sigma(X, xprof)
+
+    # y-profile at the peak column
+    yprof = Z[:, max_idx[1]]
+    sy0 = fwhm_to_sigma(Y, yprof)
+
+    # --- 3. Flatten data for fitting ---
+    xdata = np.vstack((Xg.ravel(), Yg.ravel()))
+    zdata = Z.ravel()
+
+    # --- 4. Define 2D Gaussian model ---
+    def gauss2d(coords, A, x0, y0, sx, sy, offset):
+        x, y = coords
+        return A * np.exp(-(((x - x0) ** 2) / (2 * sx ** 2) + ((y - y0) ** 2) / (2 * sy ** 2))) + offset
+
+    # --- 5. Initial parameter vector ---
+    p0 = [A0, x0_0, y0_0, sx0, sy0, offset0]
+
+    # --- 6. Fit using nonlinear least squares ---
+    popt, _ = curve_fit(gauss2d, xdata, zdata, p0=p0, maxfev=10000)
+
+    return popt
+
+
+X_im = np.array([0,    0.1550,    0.3100,    0.4650,    0.6200])
+Y_im = np.array([0,    0.1550,    0.3100,    0.4650,    0.6200])
+
+image2D = np.array([[0,         0,         0,         0,         0],
+         [0,    0.7473,    1.0000,         0,         0],
+         [0,    0.8399,    0.9715,         0,         0],
+         [0,         0,         0,         0,         0],
+         [0,         0,         0,         0,         0]])
+
+#param = fit2D_gaussian(X_im, Y_im, image2D)
+#print(param)
+#Le fit gaussien semble bien fonctionner
+
+
+from scipy.special import j1
+def f(x, y, x_try, y_try, NA, lmda):
+    """
+    Fonction initialement écrite par Émile en matlab, puis traduite en python par chatgpt.
+    La PSF.
+    Output:
+        psf - valeur correspondant à la convolution de la PSF du mandat avec un delta de Dirac situé en (x,y)
+    """
+    r = np.sqrt((x_try - x)**2 + (y_try - y)**2)
+    temp = (2 * np.pi * NA * r) / lmda
+
+    # Éviter la division par zéro
+    psf = np.zeros_like(temp)
+    nonzero = temp != 0
+    psf[nonzero] = (2 * j1(temp[nonzero]) / temp[nonzero])**2
+    psf[~nonzero] = 1.0  # Limit as temp → 0
+
+    return psf
+
+
+def generate_random_number(x, y, N_photons, NA, lmda, pixel_camera):
+    """
+    Generate random photon positions distributed according to the PSF.
+    Fonction initialement écrite par Émile en Matlab, puis traduite en python par chatgpt.
+
+    Parameters
+    ----------
+    x, y : float
+        Coordinates of the real particle.
+    N_photons : int
+        Number of photons to generate.
+    NA : float
+        Numerical aperture of the optical system.
+    lmda : float
+        Wavelength (in same units as x, y, pixel_camera).
+    pixel_camera : float
+        Pixel size of the camera (same units as x and y).
+
+    Returns
+    -------
+    X_rand, Y_rand : ndarray
+        Arrays of random photon coordinates.
+    """
+
+    # Définir la région où les pixels sont générés (par efficacité numérique)
+    n_pixel = 10
+    x_min = x - n_pixel * pixel_camera
+    x_max = x + n_pixel * pixel_camera
+    y_min = y - n_pixel * pixel_camera
+    y_max = y + n_pixel * pixel_camera
+
+    # Valeur max de la psf 
+    f_max = f(x, y, x + 1e-12, y + 1e-12, NA, lmda) # Ici la PSF!
+    print("f_max =", f_max)
+
+    X_rand = np.zeros(N_photons)
+    Y_rand = np.zeros(N_photons)
+
+    n = 0
+    count = 0
+
+    # Rejection sampling
+    while n < N_photons:
+        # Tirages uniformes
+        x_try = x_min + (x_max - x_min) * np.random.rand()
+        y_try = y_min + (y_max - y_min) * np.random.rand()
+
+        # Tirage vertical
+        u = f_max * np.random.rand()
+
+        # Acceptation  
+        if u < f(x_try, y_try, x, y, NA, lmda):
+            X_rand[n] = x_try
+            Y_rand[n] = y_try
+            n += 1
+
+        count += 1
+
+        # Si y'a pas assez de points acceptés, réduire la région d'exploration.
+        if count == 1000 and n <= 50:
+            n_pixel = int(np.ceil(0.5 * n_pixel))
+            x_min = x - n_pixel * pixel_camera
+            x_max = x + n_pixel * pixel_camera
+            y_min = y - n_pixel * pixel_camera
+            y_max = y + n_pixel * pixel_camera
+            count = 0
+
+    return X_rand, Y_rand
+
+
+
+
+
 """
 =======================================================================
 Début du code principal : 
