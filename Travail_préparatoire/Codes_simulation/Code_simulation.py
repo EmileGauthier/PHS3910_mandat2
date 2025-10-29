@@ -255,7 +255,46 @@ def generate_random_number(x, y, N_photons, NA, lmda, pixel_camera):
     return X_rand, Y_rand
 
 
+def real_image(x, y, X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixel_camera):
+    """
+    Fonction initialement écrite par Émile, puis traduite en python par chatgpt.
+    Paramètres sortie : image2D - Maillage 2D du nombre de photons par pixel
+    Paramètres entrée :
+        x et y - Coordonnées réelles de la particule.
+        X_im et Y_im donnent les positions en x et en y sur
+        le détecteur sous forme de maillage 2D.
+        NA est l'ouverture numérique du système optique;
+        lmda est la longueur d'onde du rayon incident;
+        N_photons - Nombre de photons par image
+    """
 
+    # Génération des coordonnées des photons aléatoires
+    X_rand, Y_rand = generate_random_number(x, y, N_photons, NA, lmda, pixel_camera)
+
+    # Initialisation de l'image (matrice de photons par pixel)
+    image2D = np.zeros((n_pixel_camera[1], n_pixel_camera[0]))
+
+    for i in range(N_photons):
+        x_i = X_rand[i]
+        y_i = Y_rand[i]
+
+        # Pixel associé à la position
+        index_x = int(np.floor(x_i / pixel_camera + 0.5))
+        index_y = int(np.floor(y_i / pixel_camera + 0.5))
+
+        # Vérifie que l’indice est dans les limites de l’image
+        if 0 <= index_x < n_pixel_camera[0] and 0 <= index_y < n_pixel_camera[1]:
+            image2D[index_y, index_x] += 1
+
+    # Normalisation et ajout d'un bruit de Poisson
+    image_max = np.max(image2D)
+    if image_max > 0:
+        image2D = image2D / image_max
+
+    # Ajout d’un bruit de Poisson (comme imnoise(image2D, "poisson"))
+    image2D = np.random.poisson(image2D * np.max(image2D))
+
+    return image2D
 
 
 """
