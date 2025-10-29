@@ -5,7 +5,7 @@ import numpy as np
 Fonctions importantes
 =======================================================================
 """
-def r_exp(D_exp, T, eta): # EN MILLIMÈTRES
+def calcul_r_exp(D_exp, T, eta): # EN MILLIMÈTRES
     # Calculer r avec Stokes-Einstein
     k_b = 1.380649E-23
     r_exp = (1E3)*(k_b*T)/(6*np.pi*eta*(D_exp*10^(-6))) # r_exp en mm, D_exp originalement en mm^2 / s.
@@ -303,4 +303,93 @@ Début du code principal :
 =======================================================================
 """
 
-# Écrire le code complet en python ici!!!
+import matplotlib.pyplot as plt
+
+# Paramètres de la particule
+N_step = 50  # Nombre de pas de temps par marche aléatoire
+N_marches = 10  # Nombre de marches aléatoires par valeur de paramètre
+N_param = 10  # Nombre de valeurs du paramètre testées. i.e. pour r = 0.1, 1, 10 : N_param = 3
+N_photons = 1000  # Nombre de photons reçu par la caméra par position de particules
+r_real = 1E-3  # Taille réelle de la particule (en mm)
+
+# Constantes physiques
+k_b = 1.380649E-23  # Constante de Boltzmann (J/K)
+T = 293  # Température absolue du fluide (K)
+eta = 1E-3  # Viscosité dynamique du fluide
+# La viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
+D_real = (1E6) * (k_b * T) / (6 * np.pi * eta * (r_real * 10 ** (-3)))  # Coefficient de diffusion (mm^2/s)
+
+# Paramètres de la caméra
+delta_t = 0.1e-3  # Délai entre chaque frame (1 ms entre chaque frame?)
+grossissement = 20  # Magnification du système optique
+NA = 1.33  # Ouverture numérique
+lmda = 500e-6  # Longueur d'onde captée (mm) --> 500 nm (vert)
+pixel_camera = (1.55E-3) / 50  # Taille du pixel (mm)
+n_pixels_camera = np.array([50, 50])  # Dimensions du détecteur (px)
+# VRAIE VALEUR : [4056;3040] À REMETTRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+pixel_objet = pixel_camera / grossissement  # Taille du pixel dans l'espace objet
+
+# Maillage dans l'espace image
+x_im = np.arange(0, n_pixels_camera[0]) * pixel_camera
+y_im = np.arange(0, n_pixels_camera[1]) * pixel_camera
+X_im, Y_im = np.meshgrid(x_im, y_im)
+
+# Initialisation des positions
+x_positions = np.zeros(N_step)
+y_positions = np.zeros(N_step)
+x_positions[0] = n_pixels_camera[0] / 2 * pixel_camera
+y_positions[0] = n_pixels_camera[1] / 2 * pixel_camera
+
+x_guess = np.zeros(N_step)
+y_guess = np.zeros(N_step)
+
+r_val_k = np.zeros(N_marches)
+valeurs_k = np.zeros(N_param)
+vec_r_tot = np.zeros(N_param)
+vec_std_r = np.zeros(N_param)
+
+for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
+    # Opération sur le paramètre. Par exemple, pour le temps :
+    delta_t_k = delta_t * k
+
+    for j in range(N_marches):  # Pour toutes les marches, pour une valeur du paramètre testé
+        for i in range(1, N_step):  # Pour une marche aléatoire complète
+            # Calculer une position
+            x_positions[i], y_positions[i] = brownien(x_positions[i - 1], y_positions[i - 1], D_real, delta_t_k)
+
+            # Création d'une image réelle
+            print("Commence real_image")
+            image2D = real_image(x_positions[i], y_positions[i], X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixels_camera)
+            print("Finito real_image")
+
+            # Affichage 3D (optionnel, équivalent à bar3(image2D))
+            # plt.figure()
+            # ax = plt.axes(projection='3d')
+            # ax.plot_surface(X_im, Y_im, image2D, cmap='viridis')
+            # plt.show()
+
+            # Localisation de la particule
+            param = fit2D_gaussian(x_im, y_im, image2D)
+            print("param :", param)
+            x_guess[i] = param[1]
+            y_guess[i] = param[2]
+
+        pos_guess = np.column_stack((x_guess, y_guess))
+        res_msd = compute_msd(pos_guess)  # Par défaut : max_lag = N/4
+        # res_msd = [taus, msd] des vecteurs colonnes.
+
+        D_exp = fit_msd_linear(res_msd[0], res_msd[1], delta_t_k)  # Pour une marche aléatoire complète
+        r_exp = calcul_r_exp(D_exp, T, eta)  # Pour une seule marche aléatoire complète
+        r_val_k[j] = r_exp
+
+    vec_r_tot[k - 1] = np.mean(r_val_k)
+    vec_std_r[k - 1] = np.std(r_val_k)
+    valeurs_k[k - 1] = delta_t_k  # Pour le temps
+
+# Reste plus qu'à plot les résultats : vec_r_tot vs valeurs_k , avec incertitudes en y vec_std_r
+plt.errorbar(valeurs_k, vec_r_tot, yerr=vec_std_r, fmt='o', linewidth=1.2, capsize=8)
+plt.xlabel('delta_t (s)')
+plt.ylabel('r_exp (mm)')
+plt.title('Estimation de r = 1um, pour plusieurs delta_t')
+plt.show()
+
