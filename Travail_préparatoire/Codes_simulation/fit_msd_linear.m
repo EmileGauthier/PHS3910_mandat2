@@ -1,5 +1,6 @@
 function D_exp = fit_msd_linear(taus, msd, dt)
 % Fonction qui Fit (linéairement) MSD(t) = 2*dim*D*t + C
+% Fonction déboguée avec chatgpt.
 dim = 2; % Évalue en xy
 t = taus * dt; 
 X = [t ones(size(t))]; % Initialise la matrice pour les moindres carrés. Chaque ligne est [t_i, 1]
