@@ -1,18 +1,22 @@
 import numpy as np
+from scipy.optimize import curve_fit
+from scipy.interpolate import interp1d
+from scipy.special import j1
+import matplotlib.pyplot as plt
 
 """
 =======================================================================
 Fonctions importantes
 =======================================================================
 """
-def calcul_r_exp(D_exp, T, eta): # EN MILLIMÈTRES
+def calcul_r_exp(D_exp, T, eta):
     # Calculer r avec Stokes-Einstein
     k_b = 1.380649E-23
-    r_exp = (1E3)*(k_b*T)/(6*np.pi*eta*(D_exp*10^(-6))) # r_exp en mm, D_exp originalement en mm^2 / s.
+    r_exp = (1E3)*(k_b*T)/(6*np.pi*eta*(D_exp*10**(-6))) # r_exp en mm, D_exp originalement en mm^2 / s.
     return r_exp
 
 
-def compute_msd(positions): # À valider
+def compute_msd(positions):
     """
     Input : positions (une matrice N par 2 contenant les coordonnées de tous les fits gaussiens)
             max_lag (saut maximal entre des frames subséquents, en entiers)
@@ -31,7 +35,6 @@ def compute_msd(positions): # À valider
 
     taus = np.arange(1, max_lag + 1)
     return taus, msd
-
 
 
 def fit_msd_linear(taus, msd, dt):
@@ -63,10 +66,8 @@ def fit_msd_linear(taus, msd, dt):
 
     return D_exp
 
-from scipy.optimize import curve_fit
-from scipy.interpolate import interp1d
 
-def fit2D_gaussian(X, Y, Z): # À tester...
+def fit2D_gaussian(X, Y, Z):
     """
     Perform a 2D Gaussian fit on an image.
     Généré par chatgpt.
@@ -150,22 +151,44 @@ def fit2D_gaussian(X, Y, Z): # À tester...
 
     return popt
 
+def fit2D_gaussian_v2(X, Y, Z, x_max, y_max, pixel_camera):
 
-X_im = np.array([0,    0.1550,    0.3100,    0.4650,    0.6200])
-Y_im = np.array([0,    0.1550,    0.3100,    0.4650,    0.6200])
+    xdata_full = X.ravel()
+    ydata_full = Y.ravel()
+    zdata_full = Z.ravel()
 
-image2D = np.array([[0,         0,         0,         0,         0],
-         [0,    0.7473,    1.0000,         0,         0],
-         [0,    0.8399,    0.9715,         0,         0],
-         [0,         0,         0,         0,         0],
-         [0,         0,         0,         0,         0]])
+    non_zero_index = np.nonzero(zdata_full)
 
-#param = fit2D_gaussian(X_im, Y_im, image2D)
-#print(param)
-#Le fit gaussien semble bien fonctionner
+    xdata = np.zeros(len(non_zero_index))
+    ydata = np.zeros(len(non_zero_index))
+    zdata = np.zeros(len(non_zero_index))
 
+    #fig = plt.figure()
+    #ax = fig.add_subplot(projection='3d')
+    #ax.scatter(xdata_full, ydata_full, zdata_full)
+    #plt.show()
 
-from scipy.special import j1
+    for i in range(len(non_zero_index)):
+        xdata = xdata_full[non_zero_index[i]]
+        ydata = ydata_full[non_zero_index[i]]
+        zdata = zdata_full[non_zero_index[i]]
+
+    # Fonction décrivant une gaussienne 2D
+    def gaussian2d(xy, *params):
+        (x, y) = xy
+        x0, y0, sigma_x, sigma_y, A, offset = params[0:6]
+        return offset + A * np.exp(
+            -(((x - x0)**2) / (2 * sigma_x**2) + ((y - y0)**2) / (2 * sigma_y**2))
+        )
+
+    initial_guess = [
+        x_max, y_max, 5*pixel_camera, 5*pixel_camera, 1., 0., 
+    ]
+
+    popt, pcov = curve_fit(gaussian2d, (xdata, ydata), zdata.ravel(), p0=initial_guess)
+    
+    return popt
+
 def f(x, y, x_try, y_try, NA, lmda):
     """
     Fonction initialement écrite par Émile en matlab, puis traduite en python par chatgpt.
@@ -218,7 +241,6 @@ def generate_random_number(x, y, N_photons, NA, lmda, pixel_camera):
 
     # Valeur max de la psf 
     f_max = f(x, y, x + 1e-12, y + 1e-12, NA, lmda) # Ici la PSF!
-    print("f_max =", f_max)
 
     X_rand = np.zeros(N_photons)
     Y_rand = np.zeros(N_photons)
@@ -253,7 +275,6 @@ def generate_random_number(x, y, N_photons, NA, lmda, pixel_camera):
             count = 0
 
     return X_rand, Y_rand
-
 
 def real_image(x, y, X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixel_camera):
     """
@@ -292,7 +313,7 @@ def real_image(x, y, X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixel_came
         image2D = image2D / image_max
 
     # Ajout d’un bruit de Poisson (comme imnoise(image2D, "poisson"))
-    image2D = np.random.poisson(image2D * np.max(image2D))
+    # image2D = np.random.poisson(image2D * np.max(image2D))
 
     return image2D
 
@@ -319,12 +340,10 @@ Début du code principal :
 =======================================================================
 """
 
-import matplotlib.pyplot as plt
-
 # Paramètres de la particule
-N_step = 50  # Nombre de pas de temps par marche aléatoire
-N_marches = 10  # Nombre de marches aléatoires par valeur de paramètre
-N_param = 10  # Nombre de valeurs du paramètre testées. i.e. pour r = 0.1, 1, 10 : N_param = 3
+N_step = 100  # Nombre de pas de temps par marche aléatoire
+N_marches = 1  # Nombre de marches aléatoires par valeur de paramètre
+N_param = 1  # Nombre de valeurs du paramètre testées. i.e. pour r = 0.1, 1, 10 : N_param = 3
 N_photons = 1000  # Nombre de photons reçu par la caméra par position de particules
 r_real = 1E-3  # Taille réelle de la particule (en mm)
 
@@ -336,13 +355,13 @@ eta = 1E-3  # Viscosité dynamique du fluide
 D_real = (1E6) * (k_b * T) / (6 * np.pi * eta * (r_real * 10 ** (-3)))  # Coefficient de diffusion (mm^2/s)
 
 # Paramètres de la caméra
-delta_t = 0.1e-3  # Délai entre chaque frame (1 ms entre chaque frame?)
+delta_t = 0.1e-3  # Délai entre chaque frame (s) (1 ms entre chaque frame?)
 grossissement = 20  # Magnification du système optique
 NA = 1.33  # Ouverture numérique
 lmda = 500e-6  # Longueur d'onde captée (mm) --> 500 nm (vert)
-pixel_camera = (1.55E-3) / 50  # Taille du pixel (mm)
+pixel_camera = (1.55e-3) / 50  # Taille du pixel (mm)
 n_pixels_camera = np.array([50, 50])  # Dimensions du détecteur (px)
-# VRAIE VALEUR : [4056;3040] À REMETTRE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# VRAIE VALEUR : [4056;3040]
 pixel_objet = pixel_camera / grossissement  # Taille du pixel dans l'espace objet
 
 # Maillage dans l'espace image
@@ -353,9 +372,10 @@ X_im, Y_im = np.meshgrid(x_im, y_im)
 # Initialisation des positions
 x_positions = np.zeros(N_step)
 y_positions = np.zeros(N_step)
-x_positions[0] = n_pixels_camera[0] / 2 * pixel_camera
-y_positions[0] = n_pixels_camera[1] / 2 * pixel_camera
+x_positions[0] = (n_pixels_camera[0]-1) / 2 * pixel_camera
+y_positions[0] = (n_pixels_camera[1]-1) / 2 * pixel_camera
 
+# Position estimée de la particule (par le fit gaussien)
 x_guess = np.zeros(N_step)
 y_guess = np.zeros(N_step)
 
@@ -365,6 +385,8 @@ vec_r_tot = np.zeros(N_param)
 vec_std_r = np.zeros(N_param)
 
 for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
+    print(f"Paramètre testé : {k} / {N_param}")
+
     # Opération sur le paramètre. Par exemple, pour le temps :
     delta_t_k = delta_t * k
 
@@ -374,9 +396,12 @@ for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
             x_positions[i], y_positions[i] = brownien(x_positions[i - 1], y_positions[i - 1], D_real, delta_t_k)
 
             # Création d'une image réelle
-            print("Commence real_image")
             image2D = real_image(x_positions[i], y_positions[i], X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixels_camera)
-            print("Finito real_image")
+
+            # Localisation de la particule (version Laurent)
+            # param = fit2D_gaussian(x_im, y_im, image2D)
+            # x_guess[i] = param[1]
+            # y_guess[i] = param[2]
 
             # Affichage 3D (optionnel, équivalent à bar3(image2D))
             # plt.figure()
@@ -384,11 +409,18 @@ for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
             # ax.plot_surface(X_im, Y_im, image2D, cmap='viridis')
             # plt.show()
 
-            # Localisation de la particule
-            param = fit2D_gaussian(x_im, y_im, image2D)
-            print("param :", param)
-            x_guess[i] = param[1]
-            y_guess[i] = param[2]
+            # Localisation de la particule (version Émile)
+            if i == 1:
+                index_max = np.argmax(image2D)
+                row_index, col_index = np.unravel_index(index_max, image2D.shape)
+                x_max = X_im[row_index,col_index]
+                y_max = Y_im[row_index,col_index]
+                param = fit2D_gaussian_v2(X_im, Y_im, image2D, x_max, y_max, pixel_camera)
+            else:
+                param = fit2D_gaussian_v2(X_im,Y_im,image2D, x_guess[i-1], y_guess[i-1],pixel_camera)
+
+            x_guess[i] = param[0]
+            y_guess[i] = param[1]
 
         pos_guess = np.column_stack((x_guess, y_guess))
         res_msd = compute_msd(pos_guess)  # Par défaut : max_lag = N/4
@@ -402,10 +434,14 @@ for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
     vec_std_r[k - 1] = np.std(r_val_k)
     valeurs_k[k - 1] = delta_t_k  # Pour le temps
 
+plt.plot(x_positions,y_positions)
+plt.show()
+plt.plot(x_guess[1:],y_guess[1:])
+plt.show()
+
 # Reste plus qu'à plot les résultats : vec_r_tot vs valeurs_k , avec incertitudes en y vec_std_r
 plt.errorbar(valeurs_k, vec_r_tot, yerr=vec_std_r, fmt='o', linewidth=1.2, capsize=8)
 plt.xlabel('delta_t (s)')
 plt.ylabel('r_exp (mm)')
 plt.title('Estimation de r = 1um, pour plusieurs delta_t')
 plt.show()
-
