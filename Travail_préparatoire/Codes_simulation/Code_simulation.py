@@ -12,9 +12,8 @@ Fonctions importantes
 def calcul_r_exp(D_exp, T, eta):
     # Calculer r avec Stokes-Einstein
     k_b = 1.380649E-23
-    r_exp = (1E3)*(k_b*T)/(6*np.pi*eta*(D_exp*10**(-6))) # r_exp en mm, D_exp originalement en mm^2 / s.
+    r_exp = (k_b*T)/(6*np.pi*eta*(D_exp)) # r_exp en m, D_exp originalement en m^2 / s.
     return r_exp
-
 
 def compute_msd(positions):
     """
@@ -24,18 +23,18 @@ def compute_msd(positions):
              taus : vecteur contenant les entiers des lag times, allant de 1 à max_lag. Axe x du graphique de MSD.
              msd : vecteur contenant les valeurs du msd, correspond aux valeurs y du graphique de MSD
     """
-    N = positions.shape[0] # Nb de lignes --> de positions dans la marche aléatoire complète
-    max_lag = N//4
+
+    max_lag = 7
     msd = np.zeros(max_lag) # Vecteur colonne
 
     for lag in range(1, max_lag + 1):  # lags go from 1 to max_lag inclusive
+
         diffs = positions[lag:, :] - positions[:-lag, :]  # shape: (N - lag, 2)
         sq = np.sum(diffs ** 2, axis=1)  # squared displacements
         msd[lag - 1] = np.mean(sq)
 
     taus = np.arange(1, max_lag + 1)
-    return taus, msd
-
+    return taus, msd  
 
 def fit_msd_linear(taus, msd, dt):
     """
@@ -46,26 +45,13 @@ def fit_msd_linear(taus, msd, dt):
     t = taus * dt
     X = np.column_stack((t, np.ones_like(t)))  # Initialize matrix for least squares. Each row is [t_i, 1]
     beta, _, _, _ = np.linalg.lstsq(X, msd, rcond=None)  # beta is the least-squares estimate: beta[0] = slope, beta[1] = intercept
-    pente = beta[0]  # intercept = beta[1]
+    pente = beta[0]  
+    intercept = beta[1]
     D_exp = pente / (2 * dim)
 
-    # If more information about the linear fit is needed:
-    # n = len(msd)
-    # if n > 2:
-    #     residuals = msd - X @ beta
-    #     sigma2 = np.sum(residuals ** 2) / (n - 2)
-    #     cov_beta = sigma2 * np.linalg.inv(X.T @ X)
-    # else:
-    #     cov_beta = np.full((2, 2), np.nan)
-    #
-    # if not np.isnan(cov_beta).any():
-    #     se_slope = np.sqrt(cov_beta[0, 0])
-    #     se_D = se_slope / (2 * dim)
-    # else:
-    #     se_D = np.nan
+    plot_msd_fit(taus, msd, dt, pente, intercept)
 
     return D_exp
-
 
 def fit2D_gaussian(X, Y, Z):
     """
@@ -147,7 +133,7 @@ def fit2D_gaussian(X, Y, Z):
     p0 = [A0, x0_0, y0_0, sx0, sy0, offset0]
 
     # --- 6. Fit using nonlinear least squares ---
-    popt, _ = curve_fit(gauss2d, xdata, zdata, p0=p0, maxfev=10000)
+    popt, _ = curve_fit(gauss2d, xdata, zdata, p0=p0, maxfev=100000)
 
     return popt
 
@@ -206,7 +192,6 @@ def f(x, y, x_try, y_try, NA, lmda):
     psf[~nonzero] = 1.0  # Limit as temp → 0
 
     return psf
-
 
 def generate_random_number(x, y, N_photons, NA, lmda, pixel_camera):
     """
@@ -333,6 +318,35 @@ def brownien(x1, y1, D_real, delta_t):
 
     return x2, y2
 
+def plot_msd_fit(taus, msd, dt, slope, intercept):
+    """
+    Plot MSD points and their linear fit.
+    
+    Parameters
+    ----------
+    taus : array-like
+        Time lags (indices or unitless).
+    msd : array-like
+        Mean square displacement values.
+    dt : float
+        Time step between frames.
+    slope : float
+        Slope from the linear fit.
+    intercept : float
+        Intercept from the linear fit.
+    """
+    t = taus * dt
+    msd_fit = slope * t + intercept
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(t, msd*1e12, 'o', label='MSD data')
+    plt.plot(t, msd_fit*1e12, '-', label=f'Linear fit, pente = {slope*1E12}')
+    plt.xlabel('Time (s)')
+    plt.ylabel('MSD')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 """
 =======================================================================
@@ -341,26 +355,26 @@ Début du code principal :
 """
 
 # Paramètres de la particule
-N_step = 100  # Nombre de pas de temps par marche aléatoire
-N_marches = 1  # Nombre de marches aléatoires par valeur de paramètre
+N_step = 800  # Nombre de pas de temps par marche aléatoire
+N_marches = 5  # Nombre de marches aléatoires par valeur de paramètre
 N_param = 1  # Nombre de valeurs du paramètre testées. i.e. pour r = 0.1, 1, 10 : N_param = 3
-N_photons = 1000  # Nombre de photons reçu par la caméra par position de particules
-r_real = 1E-3  # Taille réelle de la particule (en mm)
+N_photons = 500  # Nombre de photons reçu par la caméra par position de particules
+r_real = 1E-6  # Taille réelle de la particule (en m)
 
 # Constantes physiques
 k_b = 1.380649E-23  # Constante de Boltzmann (J/K)
 T = 293  # Température absolue du fluide (K)
 eta = 1E-3  # Viscosité dynamique du fluide
 # La viscosité dynamique de l'eau est environ 0,001 Pa * s à 20°C.
-D_real = (1E6) * (k_b * T) / (6 * np.pi * eta * (r_real * 10 ** (-3)))  # Coefficient de diffusion (mm^2/s)
+D_real = (k_b * T) / (6 * np.pi * eta * r_real)  # Coefficient de diffusion (m^2/s)
 
 # Paramètres de la caméra
-delta_t = 0.1e-3  # Délai entre chaque frame (s) (1 ms entre chaque frame?)
+delta_t = 0.01  # Délai entre chaque frame (s) (1 ms entre chaque frame?)
 grossissement = 20  # Magnification du système optique
 NA = 1.33  # Ouverture numérique
-lmda = 500e-6  # Longueur d'onde captée (mm) --> 500 nm (vert)
-pixel_camera = (1.55e-3) / 50  # Taille du pixel (mm)
-n_pixels_camera = np.array([50, 50])  # Dimensions du détecteur (px)
+lmda = 500e-9  # Longueur d'onde captée (m) --> 500 nm (vert)
+pixel_camera = (1.55e-6) / grossissement  # Taille du pixel (m)
+n_pixels_camera = np.array([200, 200])  # Dimensions du détecteur (px)
 # VRAIE VALEUR : [4056;3040]
 pixel_objet = pixel_camera / grossissement  # Taille du pixel dans l'espace objet
 
@@ -391,36 +405,41 @@ for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
     delta_t_k = delta_t * k
 
     for j in range(N_marches):  # Pour toutes les marches, pour une valeur du paramètre testé
-        for i in range(1, N_step):  # Pour une marche aléatoire complète
-            # Calculer une position
-            x_positions[i], y_positions[i] = brownien(x_positions[i - 1], y_positions[i - 1], D_real, delta_t_k)
+        print(f"      Marche aléatoire : {j+1} / {N_marches}")
+        for i in range(0, N_step):  # Pour une marche aléatoire complète
+
+            if i>0:
+                # Calculer une position
+                x_positions[i], y_positions[i] = brownien(x_positions[i - 1], y_positions[i - 1], D_real, delta_t_k)
+                
 
             # Création d'une image réelle
             image2D = real_image(x_positions[i], y_positions[i], X_im, Y_im, NA, lmda, N_photons, pixel_camera, n_pixels_camera)
 
             # Localisation de la particule (version Laurent)
-            # param = fit2D_gaussian(x_im, y_im, image2D)
-            # x_guess[i] = param[1]
-            # y_guess[i] = param[2]
-
+            try:
+                param = fit2D_gaussian(x_im, y_im, image2D)
+                x_guess[i] = param[1]
+                y_guess[i] = param[2]
+            except:
             # Affichage 3D (optionnel, équivalent à bar3(image2D))
-            # plt.figure()
-            # ax = plt.axes(projection='3d')
-            # ax.plot_surface(X_im, Y_im, image2D, cmap='viridis')
-            # plt.show()
+                plt.figure()
+                ax = plt.axes(projection='3d')
+                ax.plot_surface(X_im, Y_im, image2D, cmap='viridis')
+                plt.show()
 
             # Localisation de la particule (version Émile)
-            if i == 1:
-                index_max = np.argmax(image2D)
-                row_index, col_index = np.unravel_index(index_max, image2D.shape)
-                x_max = X_im[row_index,col_index]
-                y_max = Y_im[row_index,col_index]
-                param = fit2D_gaussian_v2(X_im, Y_im, image2D, x_max, y_max, pixel_camera)
-            else:
-                param = fit2D_gaussian_v2(X_im,Y_im,image2D, x_guess[i-1], y_guess[i-1],pixel_camera)
+            #if i == 1:
+            #    index_max = np.argmax(image2D)
+            #    row_index, col_index = np.unravel_index(index_max, image2D.shape)
+            #    x_max = X_im[row_index,col_index]
+            #    y_max = Y_im[row_index,col_index]
+            #    param = fit2D_gaussian_v2(X_im, Y_im, image2D, x_max, y_max, pixel_camera)
+            #else:
+            #    param = fit2D_gaussian_v2(X_im,Y_im,image2D, x_guess[i-1], y_guess[i-1],pixel_camera)
 
-            x_guess[i] = param[0]
-            y_guess[i] = param[1]
+            #x_guess[i] = param[0]
+            #y_guess[i] = param[1]
 
         pos_guess = np.column_stack((x_guess, y_guess))
         res_msd = compute_msd(pos_guess)  # Par défaut : max_lag = N/4
@@ -430,18 +449,17 @@ for k in range(1, N_param + 1):  # Pour chaque valeur du paramètre testé
         r_exp = calcul_r_exp(D_exp, T, eta)  # Pour une seule marche aléatoire complète
         r_val_k[j] = r_exp
 
+        if r_exp < 0.5e-6 or r_exp > 1.5e-6:
+            print("AAAAAAAAAHHHHH!!")
+
     vec_r_tot[k - 1] = np.mean(r_val_k)
     vec_std_r[k - 1] = np.std(r_val_k)
     valeurs_k[k - 1] = delta_t_k  # Pour le temps
 
-plt.plot(x_positions,y_positions)
-plt.show()
-plt.plot(x_guess[1:],y_guess[1:])
-plt.show()
 
 # Reste plus qu'à plot les résultats : vec_r_tot vs valeurs_k , avec incertitudes en y vec_std_r
-plt.errorbar(valeurs_k, vec_r_tot, yerr=vec_std_r, fmt='o', linewidth=1.2, capsize=8)
+plt.errorbar(valeurs_k, vec_r_tot*1e6, yerr=vec_std_r*1e6, fmt='o', linewidth=1.2, capsize=8)
 plt.xlabel('delta_t (s)')
-plt.ylabel('r_exp (mm)')
+plt.ylabel('r_exp (m)')
 plt.title('Estimation de r = 1um, pour plusieurs delta_t')
 plt.show()
