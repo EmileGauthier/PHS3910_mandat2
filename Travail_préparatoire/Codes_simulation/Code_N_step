@@ -328,7 +328,7 @@ eta = 1E-3  # Viscosité dynamique du fluide
 D_real = (k_b * T) / (6 * np.pi * eta * r_real)  # Coefficient de diffusion (m^2/s)
 
 # Paramètres de la caméra
-delta_t = 0.05  # Délai entre chaque frame (s) (1 ms entre chaque frame?)
+delta_t = 0.01  # Délai entre chaque frame (s) (1 ms entre chaque frame?)
 grossissement = 20  # Magnification du système optique
 NA = 1.33  # Ouverture numérique
 lmda = 500e-9  # Longueur d'onde captée (m) --> 500 nm (vert)
