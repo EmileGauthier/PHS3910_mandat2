@@ -315,7 +315,7 @@ Début du code principal :
 """
 
 # Paramètres de la particule
-N_step = 100  # Nombre de pas de temps par marche aléatoire
+N_step = 50  # Nombre de pas de temps par marche aléatoire
 N_marches = 20  # Nombre de marches aléatoires par valeur de paramètre
 N_photons = 500  # Nombre de photons reçu par la caméra par position de particules
 r_real = 1E-6  # Taille réelle de la particule (en m)
