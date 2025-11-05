@@ -100,7 +100,7 @@ def index_max_image(nom_fichier):
     # Fonction qui retourne les indices du maximum d'une image
 
     # Ouverture de l'image
-    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\Images_tests\\ezgif-frame-001.jpg")
+    image2D = plt.imread(nom_fichier)
 
     # Conversion de l'image de RGBA à gris
     image2D = cv2.cvtColor(image2D, cv2.COLOR_RGBA2GRAY)
@@ -167,12 +167,12 @@ y_guess = np.zeros(N_images)
 pixel_camera = (1.55e-6) / grossissement  # Taille du pixel (m)
 
 # Position du maximum de la première image, pour zoom sur une région d'intérêt
-index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\Images_tests\\ezgif-frame-001.jpg")
+index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\sansfiltre_frames\\0000000001.png")
 
 for i in range(N_images):
 
     # Ouverture de l'image
-    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\Images_tests\\ezgif-frame-{:03}.jpg".format(i+1))
+    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\sansfiltre_frames\\{:010}.png".format(i+1))
 
     # Conversion de l'image de RGBA à gris
     image2D = cv2.cvtColor(image2D, cv2.COLOR_RGBA2GRAY)
