@@ -156,7 +156,7 @@ eta = 1E-3  # Viscosité dynamique du fluide
 # Paramètres de la caméra
 delta_t = 0.017  # Délai entre chaque frame (s)
 grossissement = 20 # Grossissement du système optique
-N_images = 24 # Nombre d'images 
+N_images = 227 # Nombre d'images 
 
 # Paramètres de performance
 N_pixel = 50 # Détermine la taille de la région d'intérêt dans les images. 
@@ -177,15 +177,19 @@ for i in range(N_images):
     # Conversion de l'image de RGBA à gris
     image2D = cv2.cvtColor(image2D, cv2.COLOR_RGBA2GRAY)
 
-    # Pour réduire la qualité de l'image
+    # Pour réduire la qualité de l'image (le chiffre après les deux :: est le facteur de réduction)
     image2D = image2D[::1, ::1]
 
     # Sélectionner la partie de l'image qui nous intéresse
     image2D = image2D[(index_max[0] - N_pixel):(index_max[0] + N_pixel),(index_max[1] - N_pixel):(index_max[1] + N_pixel)]
 
+    # Affichage de l'image
+    #plt.imshow(image2D)
+    #plt.show()
+
     # Maillage
-    x_im = np.arange(0, len(image2D[:,0])) # * pixel_camera
-    y_im = np.arange(0, len(image2D[0,:])) # * pixel_camera
+    x_im = np.arange(0, len(image2D[:,0])) # On laisse les unités en pixel pour faciliter le fit gaussien
+    y_im = np.arange(0, len(image2D[0,:]))
     X_im, Y_im = np.meshgrid(x_im, y_im)
     
     # Localisation de particules
@@ -204,8 +208,17 @@ for i in range(N_images):
         x_guess[i] = param[0 + 6*j_closer] 
         y_guess[i] = param[1 + 6*j_closer]
 
+# Affichage de la trajectoire de la particule
+#plt.imshow(image2D)
+#plt.plot(x_guess,y_guess, color= 'red')
+#plt.show()
+
+# Affichage du déplacement en fonction des images
+#plt.plot(np.sqrt(np.power(x_guess,2) + np.power(y_guess,2)))
+#plt.show()
+
 # Calcul de la MSD
-pos_guess = np.column_stack((x_guess*pixel_camera, y_guess*pixel_camera))
+pos_guess = np.column_stack((x_guess*pixel_camera, y_guess*pixel_camera)) # On transforme les unités en mètre
 res_msd = compute_msd(pos_guess)
 
 # Fit linéaire de la MSD pour obtenir le coefficient D_exp et ensuite le rayon r_exp
