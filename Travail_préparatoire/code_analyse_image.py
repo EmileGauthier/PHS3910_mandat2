@@ -34,18 +34,18 @@ def fit2D_multiple_gaussians(X_im,Y_im,image2D):
     y_max = np.zeros(len(coordinates))
     # Coordonnées xy des maximums locaux
 
-    #plt.imshow(np.transpose(image2D))
+    plt.imshow(np.transpose(image2D))
     for i in range(len(coordinates)):
         x_max[i] = X_im[int(coordinates[i][1])][int(coordinates[i][0])]
         y_max[i] = Y_im[int(coordinates[i][1])][int(coordinates[i][0])]
-        #plt.scatter(x_max[i]/pixel_camera,y_max[i]/pixel_camera,color='red')
+        plt.scatter(x_max[i]/pixel_camera,y_max[i]/pixel_camera,color='red')
     
-    #plt.show()
+    plt.show()
 
     initial_guess = []
     # Estimation initiale des paramètres
     for i in range(len(coordinates)):
-        initial_guess = np.append(initial_guess,[x_max[i], y_max[i],10, 10, 100., 5])
+        initial_guess = np.append(initial_guess,[x_max[i], y_max[i],10, 10, 100., 20])
 
     popt, pcov = curve_fit(multi_gaussian2d, (X_im, Y_im), np.transpose(image2D).ravel(), p0=initial_guess)
 
@@ -60,7 +60,7 @@ def compute_msd(positions):
              msd : vecteur contenant les valeurs du msd, correspond aux valeurs y du graphique de MSD
     """
 
-    max_lag = 6
+    max_lag = 5
     msd = np.zeros(max_lag) # Vecteur colonne
 
     for lag in range(1, max_lag + 1):  # lags go from 1 to max_lag inclusive
@@ -112,7 +112,7 @@ def index_max_image(nom_fichier):
 
     coordinates = np.add(peak_local_max(image2D[N:-N, N:-N], exclude_border=False, min_distance=30,threshold_rel=0.5), N)
     
-    return coordinates[0,:]
+    return coordinates[1,:]
 
 def plot_msd_fit(taus, msd, dt, slope, intercept):
     """
@@ -153,28 +153,28 @@ Début du code principal :
 # Constantes physiques
 k_b = 1.380649E-23  # Constante de Boltzmann (J/K)
 T = 293  # Température absolue du fluide (K)
-eta = 1E-3  # Viscosité dynamique du fluide
+eta = 1.01e-3  # Viscosité dynamique du fluide (Pa s)
 
 # Paramètres de la caméra
 delta_t = 0.5  # Délai entre chaque frame (s)
-grossissement = 7.52/4 # Grossissement du système optique
-N_images = 118 # Nombre d'images 
+N_images = 116 # Nombre d'images 
+pixel_camera = 0.377e-6 # Taille du pixel (m)
+grossissement = 1.55e-6 / pixel_camera
 
 # Paramètres de performance
 N_pixel = 30 # Détermine la taille de la région d'intérêt dans les images. 
 
+# Initialisation des array pour les positions estimées
 x_guess = np.zeros(N_images)
 y_guess = np.zeros(N_images)
 
-pixel_camera = (1.55e-6) / grossissement  # Taille du pixel (m)
-
 # Position du maximum de la première image, pour zoom sur une région d'intérêt
-index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse3min_1080p_2fps\\img_0000.jpg")
+index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse_1080p_2fps_10enchantillon2\\img_0000.jpg")
 
 for i in range(N_images):
 
     # Ouverture de l'image
-    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse3min_1080p_2fps\\img_{:04}.jpg".format(i))
+    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse_1080p_2fps_10enchantillon2\\img_{:04}.jpg".format(i))
 
     # Affichage de l'image brut
     #plt.imshow(image2D)
