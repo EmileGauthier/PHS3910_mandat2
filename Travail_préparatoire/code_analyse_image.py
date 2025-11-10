@@ -60,7 +60,7 @@ def compute_msd(positions):
              msd : vecteur contenant les valeurs du msd, correspond aux valeurs y du graphique de MSD
     """
 
-    max_lag = 7
+    max_lag = 6
     msd = np.zeros(max_lag) # Vecteur colonne
 
     for lag in range(1, max_lag + 1):  # lags go from 1 to max_lag inclusive
@@ -108,9 +108,11 @@ def index_max_image(nom_fichier):
     # Pour réduire la qualité de l'image
     image2D = image2D[::1, ::1]
 
-    index_max = np.add(np.unravel_index(np.argmax(image2D[100:-100, 100:-100], axis=None), (image2D[100:-100, 100:-100]).shape), 100)
+    N = 50
 
-    return index_max
+    coordinates = np.add(peak_local_max(image2D[N:-N, N:-N], exclude_border=False, min_distance=30,threshold_rel=0.5), N)
+    
+    return coordinates[0,:]
 
 def plot_msd_fit(taus, msd, dt, slope, intercept):
     """
@@ -154,12 +156,12 @@ T = 293  # Température absolue du fluide (K)
 eta = 1E-3  # Viscosité dynamique du fluide
 
 # Paramètres de la caméra
-delta_t = 0.017  # Délai entre chaque frame (s)
-grossissement = 20 # Grossissement du système optique
-N_images = 227 # Nombre d'images 
+delta_t = 0.5  # Délai entre chaque frame (s)
+grossissement = 7.52/4 # Grossissement du système optique
+N_images = 118 # Nombre d'images 
 
 # Paramètres de performance
-N_pixel = 50 # Détermine la taille de la région d'intérêt dans les images. 
+N_pixel = 30 # Détermine la taille de la région d'intérêt dans les images. 
 
 x_guess = np.zeros(N_images)
 y_guess = np.zeros(N_images)
@@ -167,12 +169,16 @@ y_guess = np.zeros(N_images)
 pixel_camera = (1.55e-6) / grossissement  # Taille du pixel (m)
 
 # Position du maximum de la première image, pour zoom sur une région d'intérêt
-index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\sansfiltre_frames\\0000000001.png")
+index_max = index_max_image("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse3min_1080p_2fps\\img_0000.jpg")
 
 for i in range(N_images):
 
     # Ouverture de l'image
-    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\sansfiltre_frames\\{:010}.png".format(i+1))
+    image2D = plt.imread("C:\\Users\\gauth\\OneDrive\\Documents\\Polytechnique\\Polytechnique automne 2025\\Techniques expérimentales et instrumentation\\Mandat 2\\code_microscope\\timelapse3min_1080p_2fps\\img_{:04}.jpg".format(i))
+
+    # Affichage de l'image brut
+    #plt.imshow(image2D)
+    #plt.show()
 
     # Conversion de l'image de RGBA à gris
     image2D = cv2.cvtColor(image2D, cv2.COLOR_RGBA2GRAY)
@@ -183,7 +189,7 @@ for i in range(N_images):
     # Sélectionner la partie de l'image qui nous intéresse
     image2D = image2D[(index_max[0] - N_pixel):(index_max[0] + N_pixel),(index_max[1] - N_pixel):(index_max[1] + N_pixel)]
 
-    # Affichage de l'image
+    # Affichage de l'image découpée
     #plt.imshow(image2D)
     #plt.show()
 
@@ -209,9 +215,9 @@ for i in range(N_images):
         y_guess[i] = param[1 + 6*j_closer]
 
 # Affichage de la trajectoire de la particule
-#plt.imshow(image2D)
-#plt.plot(x_guess,y_guess, color= 'red')
-#plt.show()
+plt.imshow(image2D)
+plt.plot(y_guess,x_guess, color= 'red')
+plt.show()
 
 # Affichage du déplacement en fonction des images
 #plt.plot(np.sqrt(np.power(x_guess,2) + np.power(y_guess,2)))
@@ -223,6 +229,9 @@ res_msd = compute_msd(pos_guess)
 
 # Fit linéaire de la MSD pour obtenir le coefficient D_exp et ensuite le rayon r_exp
 D_exp = fit_msd_linear(res_msd[0], res_msd[1], delta_t) 
+
+print(f"La valeur du coefficient de diffusion est {D_exp} m^2/s.")
+
 r_exp = calcul_r_exp(D_exp, T, eta) 
 
 print(f"Le rayon estimé de la particule est de {1e6*r_exp} um.")
